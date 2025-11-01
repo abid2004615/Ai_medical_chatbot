@@ -26,24 +26,39 @@ model="meta-llama/llama-4-scout-17b-16e-instruct"
 #model = "meta-llama/llama-4-scout-17b-16e-instruct"
 #model="llama-3.2-90b-vision-preview" #Deprecated
 
-def analyze_image_with_query(query, model, encoded_image):
-    client=Groq()  
+def analyze_image_with_query(query, model, encoded_image=None):
+    client=Groq()
+    
+    # Build content based on whether image is provided
+    if encoded_image:
+        content = [
+            {
+                "type": "text", 
+                "text": query
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{encoded_image}",
+                },
+            },
+        ]
+    else:
+        # Text-only query
+        content = [
+            {
+                "type": "text", 
+                "text": query
+            }
+        ]
+    
     messages=[
         {
             "role": "user",
-            "content": [
-                {
-                    "type": "text", 
-                    "text": query
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{encoded_image}",
-                    },
-                },
-            ],
-        }]
+            "content": content,
+        }
+    ]
+    
     chat_completion=client.chat.completions.create(
         messages=messages,
         model=model
