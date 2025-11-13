@@ -1,4 +1,5 @@
 import os
+import time
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -9,15 +10,23 @@ load_dotenv()
 from brain_of_the_doctor import encode_image, analyze_image_with_query
 from voice_of_the_patient import transcribe_with_groq
 from voice_of_the_doctor import text_to_speech_with_gtts, text_to_speech_with_elevenlabs
+from database import db
+from severity_classifier import severity_classifier
+from question_generator import question_generator
 
 app = Flask(__name__, static_folder='static', static_url_path='')
 
 # Configure CORS to allow requests from Next.js frontend
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:3000"],
-        "methods": ["GET", "POST"],
-        "allow_headers": ["Content-Type"]
+        "origins": [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3001",  # Alternative port
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": False
     }
 })
 
@@ -30,104 +39,60 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Store chat history (in production, use database or session storage)
 chat_sessions = {}
 
-# System prompt for the AI doctor
-SYSTEM_PROMPT = """You are MediChat – a professional medical AI health assistant. Your job is to help users by analyzing symptoms, medications, health questions, images, and voice input.
+# System prompt
+SYSTEM_PROMPT = """You are MediChat, a professional medical AI assistant. Analyze symptoms and provide comprehensive medical guidance.
 
-✅ CORE ABILITIES:
+IMPORTANT: Read the full conversation history to understand what information you already have.
 
-1. Accept symptoms from:
-   - Text input
-   - Voice-to-text input
-   - User-uploaded images (skin issues, wounds, rashes)
-   - Multiple symptoms combined together
+YOUR TASK:
+1. Review what the user has told you so far
+2. If you have enough info (symptoms + severity/duration), provide the FULL SUMMARY immediately
+3. If critical info is missing, ask ALL missing info in ONE combined question
 
-2. Provide comprehensive health guidance:
-   - Possible causes / conditions
-   - Personalized daily routine
-   - Diet and nutrition suggestions
-   - Do's and Don'ts for their condition
-   - Simple exercises or stretches (if safe)
-   - Water intake and sleep recommendations
-   - Preventive care tips
-   - When to see a doctor
-   - Emergency red-flag warnings
-   - Home remedies and OTC medicines
+WHEN ASKING QUESTIONS:
+- Combine multiple questions into ONE sentence
+- Example: "On a scale of 1-10, how severe is it, when did it start, and are you taking any medications?"
+- Ask about: severity (1-10 scale), timing (when started), other symptoms, current medications
+- Keep it conversational and brief
 
-3. Medication Information:
-   - Dosage guidance (general non-prescription info)
-   - Side effects & interactions
-   - Who should NOT take the medicine
-   - Safer alternatives when applicable
+PROVIDE FULL SUMMARY when you know:
+- What the symptoms are
+- How severe they are (or how long they've lasted)
 
-✅ PERSONALIZATION:
-   - If user provides age, gender, or symptoms, personalize the plan
-   - Tailor diet, routine, and exercises to their specific situation
-   - Consider their lifestyle and capabilities
+SUMMARY FORMAT:
+**DIAGNOSIS SUMMARY:**
+Condition: [Most likely condition]
+Severity: [Mild/Moderate/Severe]
 
-✅ RESPONSE FORMAT (for health advice, always follow this structure):
+**RECOMMENDED MEDICATIONS:**
+• Primary: [Medicine name, dosage, frequency, duration]
+• Alternative: [If primary not available]
 
-1. **Summary of the Issue**
-   - Brief understanding of their condition
+**LIFESTYLE RECOMMENDATIONS:**
+• [3-4 specific recommendations for diet, rest, activities]
 
-2. **Diet Plan**
-   - Morning: What to eat/drink
-   - Afternoon: Meal suggestions
-   - Night: Dinner recommendations
-   - Foods to avoid
+**WARNING SIGNS - Seek immediate care if:**
+• [List red flag symptoms]
 
-3. **Daily Routine Schedule**
-   - Wake-up time and morning routine
-   - Afternoon activities
-   - Evening routine
-   - Sleep schedule
-   - Water intake recommendations
+**FOLLOW-UP:**
+• See doctor if: [conditions]
+• Expected recovery: [timeline]
 
-4. **Exercises / Activities**
-   - Safe exercises or stretches
-   - Duration and frequency
-   - Activities to avoid
-   - Rest periods
+Be efficient: combine questions. Be detailed in summaries."""
 
-5. **Home Remedies** (if safe)
-   - Natural remedies
-   - Self-care tips
-   - Do's and Don'ts
-
-6. **Warning Signs - When to See a Doctor**
-   - Red flags to watch for
-   - Emergency symptoms
-   - When to seek immediate medical help
-
-✅ RESPONSE STYLE:
-   - Keep language simple and clear
-   - Use short paragraphs and bullet points
-   - No fear-creating words
-   - No actual prescriptions – only guidance
-   - Always include: "If symptoms worsen, consult a doctor."
-
-✅ IMAGE ANALYSIS:
-   - If the user uploads an image (rash, wound, swelling, acne), analyze visible signs and provide possibilities
-   - Do not claim guaranteed diagnosis, only probabilities
-
-✅ VOICE INPUT:
-   - If user speaks, transcribe and respond normally
-
-✅ SYMPTOM COMBINATION:
-   If user enters multiple symptoms, analyze them together.
-   Example: Headache + fever + body aches → possible flu, dengue, viral infection
-
-✅ LANGUAGE SUPPORT:
-   - Detect user language automatically (Kannada, Hindi, English, or any other)
-   - Reply in same language
-   - If user requests a different language, switch immediately
-
-✅ SAFETY RULES:
-   - No guaranteed diagnosis or prescriptions
-   - No harmful recommendations
-   - If serious symptoms – suggest urgent medical help
-   - Avoid giving strict medical diagnosis; give guidance only
-
-IMPORTANT: Respond as a knowledgeable health assistant. Always match the user's language automatically. Provide comprehensive, personalized health guidance following the 6-point format above."""
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint to verify backend is running
+    Returns server status and basic information
+    """
+    import time
+    return jsonify({
+        'status': 'ok',
+        'message': 'MediChat backend is running',
+        'timestamp': int(time.time() * 1000),
+        'version': '1.0.0'
+    }), 200
 
 @app.route('/api/process', methods=['POST'])
 def process_api():
@@ -140,12 +105,17 @@ def process_api():
     
     Automatically detects input type and language, maintains chat history
     """
+    start_time = time.time()
+    
     try:
         # Extract all possible inputs
         text_message = request.form.get('message', '').strip()
         image_file = request.files.get('image')
         audio_file = request.files.get('audio')
         session_id = request.form.get('session_id', 'default')
+        
+        # Create session in database
+        db.create_session(session_id)
         
         # Initialize session history if not exists
         if session_id not in chat_sessions:
@@ -156,6 +126,7 @@ def process_api():
         encoded_image = None
         query_text = ""
         input_type = []
+        severity_info = None
         
         # Process voice input if present
         if audio_file:
@@ -188,18 +159,128 @@ def process_api():
         if not query_text and not encoded_image:
             return jsonify({'error': 'No input provided'}), 400
         
-        # Build context from chat history (last 5 messages)
-        context = ""
-        if len(chat_sessions[session_id]) > 0:
-            context = "\n\nPrevious conversation context:\n"
-            for msg in chat_sessions[session_id][-5:]:
-                context += f"User: {msg['user']}\nAssistant: {msg['assistant']}\n"
+        # Disable automatic severity classification
+        severity_level = 'UNKNOWN'
+        severity_score = 0
+        matched_keywords = []
+        severity_info = None
         
-        # Build final query with context
-        if encoded_image and not query_text:
-            final_query = SYSTEM_PROMPT + context + "\n\nUser sent an image. Analyze this medical image and provide a detailed assessment."
+        # Save user message to database without severity
+        db.save_message(session_id, 'user', query_text.strip() or "[image]", 
+                       ','.join(input_type), None)
+        
+        # Extract and save symptoms automatically (only if text is provided)
+        if query_text:
+            symptom_keywords = ['pain', 'ache', 'fever', 'cough', 'headache', 'nausea', 'vomit', 
+                               'diarrhea', 'constipation', 'dizzy', 'fatigue', 'tired', 'weak',
+                               'sore', 'swelling', 'rash', 'itch', 'burn', 'bleed', 'hurt']
+            query_lower = query_text.lower()
+            for keyword in symptom_keywords:
+                if keyword in query_lower:
+                    # Extract severity if mentioned
+                    severity = None
+                    if any(word in query_lower for word in ['severe', 'bad', 'terrible', 'worst']):
+                        severity = 'severe'
+                    elif any(word in query_lower for word in ['mild', 'slight', 'little']):
+                        severity = 'mild'
+                    elif any(word in query_lower for word in ['moderate', 'medium']):
+                        severity = 'moderate'
+                    
+                    db.save_symptom(session_id, keyword, severity)
+                    break  # Only save primary symptom
+        
+        # Get full conversation context - NEED THIS TO UNDERSTAND REPLIES
+        history = db.get_session_history(session_id, limit=10)
+        
+        # Get session memory (past symptoms, diagnoses, medications)
+        try:
+            session_memory = db.get_session_memory(session_id)
+        except Exception as e:
+            print(f"Error getting session memory: {e}")
+            session_memory = {'has_history': False}
+        
+        # Build session memory context if user has history
+        memory_context = ""
+        if session_memory.get('has_history'):
+            memory_context = "\n\nPATIENT MEDICAL HISTORY (from this session):\n"
+            
+            # Add past symptoms
+            if session_memory.get('past_symptoms'):
+                memory_context += "Previous Symptoms:\n"
+                for symptom in session_memory['past_symptoms'][:5]:  # Last 5 symptoms
+                    memory_context += f"  • {symptom['symptom']}"
+                    if symptom.get('severity'):
+                        memory_context += f" (severity: {symptom['severity']})"
+                    memory_context += f" - reported {symptom['when']}\n"
+            
+            # Add past diagnoses
+            if session_memory.get('past_diagnoses'):
+                memory_context += "\nPrevious Diagnoses:\n"
+                for diagnosis in session_memory['past_diagnoses'][:2]:  # Last 2 diagnoses
+                    # Extract just the condition line from summary
+                    summary = diagnosis['summary']
+                    if 'Condition:' in summary:
+                        condition_line = summary.split('Condition:')[1].split('\n')[0].strip()
+                        memory_context += f"  • {condition_line} - diagnosed {diagnosis['when']}\n"
+            
+            # Add mentioned medications
+            if session_memory.get('mentioned_medications'):
+                memory_context += "\nMedications Mentioned:\n"
+                for med in session_memory['mentioned_medications'][:3]:  # Last 3 mentions
+                    memory_context += f"  • {med['message'][:100]}...\n"
+            
+            memory_context += "\nIMPORTANT: Consider this history when providing advice. If this is a follow-up about a previous condition, acknowledge it.\n"
+        
+        # Build conversation context for AI
+        conversation_context = memory_context + "\n\nCURRENT CONVERSATION:\n"
+        for msg in history:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if role == 'user':
+                conversation_context += f"Patient: {content}\n"
+            else:
+                conversation_context += f"You: {content}\n"
+        
+        # Add current message
+        conversation_context += f"Patient: {query_text.strip()}\n"
+        
+        # Analyze what info we have
+        missing_info = question_generator.get_missing_info(query_text, history)
+        
+        # Count conversation turns
+        turn_count = len([m for m in history if m.get('role') == 'user'])
+        
+        # Determine if we should generate summary
+        has_symptoms = len(query_text) > 10
+        has_severity = missing_info.get('severity')
+        has_duration = missing_info.get('duration') or missing_info.get('onset_time')
+        
+        # Build instruction based on completeness
+        if (has_symptoms and (has_severity or has_duration)) or turn_count >= 2:
+            instruction = "\n\nYou have enough information. Provide the COMPLETE MEDICAL SUMMARY now using the format above."
         else:
-            final_query = SYSTEM_PROMPT + context + "\n\nUser query: " + query_text.strip()
+            # List what's missing
+            missing_items = []
+            if not missing_info.get('severity'):
+                missing_items.append("severity (1-10 scale)")
+            if not missing_info.get('onset_time') and not missing_info.get('duration'):
+                missing_items.append("when it started")
+            if not missing_info.get('medications'):
+                missing_items.append("any medications you're taking")
+            if not missing_info.get('associated_symptoms'):
+                missing_items.append("any other symptoms")
+            
+            if missing_items:
+                missing_str = ", ".join(missing_items)
+                instruction = f"\n\nAsk about these in ONE combined question: {missing_str}. Keep it conversational."
+            else:
+                instruction = "\n\nAsk ONE brief question to clarify the symptoms."
+        
+        # Build final query
+        if encoded_image and not query_text:
+            final_query = SYSTEM_PROMPT + conversation_context + "\n\nImage received. Describe what you see and ask about symptoms."
+        else:
+            final_query = SYSTEM_PROMPT + conversation_context + instruction
         
         # Analyze with AI
         response = analyze_image_with_query(
@@ -208,11 +289,17 @@ def process_api():
             model="meta-llama/llama-4-scout-17b-16e-instruct"
         )
         
-        # Store in chat history
+        # No automatic severity warnings
+        
+        # Save assistant response to database
+        db.save_message(session_id, 'assistant', response, None, None)
+        
+        # Store in chat history (memory)
         chat_sessions[session_id].append({
             'user': query_text.strip() or "[image]",
             'assistant': response,
-            'input_type': input_type
+            'input_type': input_type,
+            'severity': severity_level
         })
         
         # Keep only last 20 messages to prevent memory issues
@@ -231,11 +318,20 @@ def process_api():
                 output_filepath="static/response.mp3"
             )
         
+        # Calculate response time
+        response_time = time.time() - start_time
+        
+        # Save ML metrics
+        db.save_ml_metric('response_time', response_time, response_time, None)
+        db.save_ml_metric('query_processed', 1, response_time, None)
+        
         return jsonify({
             'transcription': transcription,
             'response': response,
             'audio_url': '/response.mp3',
-            'input_type': input_type
+            'input_type': input_type,
+            'severity': severity_info,
+            'response_time': round(response_time, 3)
         })
     
     except Exception as e:
@@ -246,3 +342,51 @@ def process_api():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+
+@app.route('/api/metrics', methods=['GET'])
+def get_metrics():
+    """Get ML performance metrics"""
+    try:
+        metrics = db.get_ml_metrics_summary()
+        return jsonify(metrics), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/health-trends/<session_id>', methods=['GET'])
+def get_health_trends(session_id):
+    """Get health trends for continuous monitoring"""
+    try:
+        trends = db.get_health_trends(session_id)
+        symptoms_history = db.get_symptoms_history(session_id)
+        
+        return jsonify({
+            'trends': trends,
+            'symptoms_history': symptoms_history
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/session-history/<session_id>', methods=['GET'])
+def get_session_history(session_id):
+    """Get complete session history"""
+    try:
+        history = db.get_session_history(session_id, limit=50)
+        return jsonify({'history': history}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analyze-symptoms', methods=['POST'])
+def analyze_symptoms():
+    """Analyze multiple symptoms for severity"""
+    try:
+        data = request.get_json()
+        symptoms = data.get('symptoms', [])
+        
+        if not symptoms:
+            return jsonify({'error': 'No symptoms provided'}), 400
+        
+        analysis = severity_classifier.analyze_symptom_combination(symptoms)
+        return jsonify(analysis), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

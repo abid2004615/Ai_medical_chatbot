@@ -19,16 +19,124 @@ export interface ApiResponse {
   audio_url?: string
   input_type: string[]
   error?: string
+  severity?: SeverityInfo
+  response_time?: number
+}
+
+export interface SeverityInfo {
+  level: 'EMERGENCY' | 'HIGH' | 'MODERATE' | 'LOW' | 'MINIMAL'
+  score: number
+  keywords: string[]
+  message: string
+}
+
+export interface MetricsSummary {
+  avg_response_time: number
+  avg_accuracy: number
+  total_queries: number
+  successful_responses: number
+  success_rate: number
+}
+
+export interface HealthCheckResponse {
+  status: 'ok' | 'error'
+  message: string
+  timestamp: number
+  version?: string
+}
+
+export enum ErrorType {
+  BACKEND_NOT_RUNNING = 'BACKEND_NOT_RUNNING',
+  CONNECTION_REFUSED = 'CONNECTION_REFUSED',
+  TIMEOUT = 'TIMEOUT',
+  SERVER_ERROR = 'SERVER_ERROR',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  UNKNOWN = 'UNKNOWN'
 }
 
 export class ApiError extends Error {
+  public type: ErrorType
+  public userMessage: string
+  public technicalMessage: string
+  public retryable: boolean
+
   constructor(
     public statusCode: number,
     message: string,
-    public originalError?: Error
+    public originalError?: Error,
+    type?: ErrorType
   ) {
     super(message)
     this.name = "ApiError"
+    this.technicalMessage = message
+    
+    // Classify error type if not provided
+    this.type = type || this.classifyError(statusCode, message, originalError)
+    
+    // Set user-friendly message and retryability
+    const errorInfo = this.getErrorInfo(this.type)
+    this.userMessage = errorInfo.userMessage
+    this.retryable = errorInfo.retryable
+  }
+
+  private classifyError(statusCode: number, message: string, originalError?: Error): ErrorType {
+    // Network errors (fetch failed)
+    if (statusCode === 0 || originalError?.name === 'TypeError') {
+      const errorMsg = originalError?.message?.toLowerCase() || message.toLowerCase()
+      if (errorMsg.includes('failed to fetch') || errorMsg.includes('network request failed')) {
+        return ErrorType.BACKEND_NOT_RUNNING
+      }
+      return ErrorType.NETWORK_ERROR
+    }
+
+    // Timeout errors
+    if (message.toLowerCase().includes('timeout')) {
+      return ErrorType.TIMEOUT
+    }
+
+    // Server errors
+    if (statusCode >= 500) {
+      return ErrorType.SERVER_ERROR
+    }
+
+    // Connection refused
+    if (message.toLowerCase().includes('connection refused') || 
+        message.toLowerCase().includes('econnrefused')) {
+      return ErrorType.CONNECTION_REFUSED
+    }
+
+    return ErrorType.UNKNOWN
+  }
+
+  private getErrorInfo(type: ErrorType): { userMessage: string; retryable: boolean } {
+    const ERROR_MESSAGES: Record<ErrorType, { userMessage: string; retryable: boolean }> = {
+      [ErrorType.BACKEND_NOT_RUNNING]: {
+        userMessage: 'Backend server is not running. Please start the Flask server on port 5000.',
+        retryable: false
+      },
+      [ErrorType.CONNECTION_REFUSED]: {
+        userMessage: 'Unable to connect to the medical assistant. Please check your connection.',
+        retryable: true
+      },
+      [ErrorType.TIMEOUT]: {
+        userMessage: 'Request timed out. Please try again.',
+        retryable: true
+      },
+      [ErrorType.SERVER_ERROR]: {
+        userMessage: 'The server encountered an error. Please try again later.',
+        retryable: true
+      },
+      [ErrorType.NETWORK_ERROR]: {
+        userMessage: 'Network error occurred. Please check your internet connection.',
+        retryable: true
+      },
+      [ErrorType.UNKNOWN]: {
+        userMessage: 'An unexpected error occurred. Please try again.',
+        retryable: true
+      }
+    }
+
+    return ERROR_MESSAGES[type]
   }
 }
 
@@ -197,6 +305,82 @@ class ApiClient {
       sessionId,
       audio: audioBlob,
     })
+  }
+
+  /**
+   * Check backend health status
+   */
+  async checkHealth(): Promise<HealthCheckResponse> {
+    const url = `${this.baseUrl}/api/health`
+    
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(5000) // 5 second timeout
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        return data as HealthCheckResponse
+      }
+
+      return {
+        status: 'error',
+        message: `Health check failed with status ${response.status}`,
+        timestamp: Date.now()
+      }
+    } catch (error) {
+      console.error('[API] Health check failed:', error)
+      return {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Health check failed',
+        timestamp: Date.now()
+      }
+    }
+  }
+
+  /**
+   * Check if backend is available
+   */
+  async isBackendAvailable(): Promise<boolean> {
+    const health = await this.checkHealth()
+    return health.status === 'ok'
+  }
+
+  /**
+   * Get ML metrics summary
+   */
+  async getMetrics(): Promise<MetricsSummary> {
+    const url = `${this.baseUrl}/api/metrics`
+    
+    try {
+      const response = await fetch(url)
+      if (response.ok) {
+        return await response.json()
+      }
+      throw new Error('Failed to fetch metrics')
+    } catch (error) {
+      console.error('[API] Failed to fetch metrics:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Get health trends for a session
+   */
+  async getHealthTrends(sessionId: string): Promise<any> {
+    const url = `${this.baseUrl}/api/health-trends/${sessionId}`
+    
+    try {
+      const response = await fetch(url)
+      if (response.ok) {
+        return await response.json()
+      }
+      throw new Error('Failed to fetch health trends')
+    } catch (error) {
+      console.error('[API] Failed to fetch health trends:', error)
+      throw error
+    }
   }
 }
 

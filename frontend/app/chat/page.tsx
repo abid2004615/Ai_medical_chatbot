@@ -6,18 +6,24 @@ import { ChatMessage, Message } from "@/components/chat/ChatMessage"
 import { ChatInput } from "@/components/chat/ChatInput"
 import { VoiceRecorder } from "@/components/chat/VoiceRecorder"
 import { ImageUploader } from "@/components/chat/ImageUploader"
-import { apiClient, getSessionId, ApiError } from "@/lib/api-client"
+import { apiClient, getSessionId, ApiError, SeverityInfo } from "@/lib/api-client"
+import { ErrorBanner, ConnectionStatus } from "@/components/ErrorBanner"
+import { SeverityIndicator } from "@/components/SeverityIndicator"
+import { MetricsDashboard } from "@/components/MetricsDashboard"
 
 export default function ChatPage() {
   const router = useRouter()
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
   const [sessionId] = useState(() => getSessionId())
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null)
   const [inputValue, setInputValue] = useState("")
   const [activeView, setActiveView] = useState("chat")
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(ConnectionStatus.UNKNOWN)
+  const [lastFailedAction, setLastFailedAction] = useState<(() => Promise<void>) | null>(null)
+  const [currentSeverity, setCurrentSeverity] = useState<SeverityInfo | null>(null)
   
   // Symptom Analyzer states
   const [symptoms, setSymptoms] = useState<string[]>([])
@@ -103,13 +109,20 @@ export default function ChatPage() {
   }
 
   const showTypingIndicator = () => {
-    const typingMessage: Message = {
-      id: "typing",
-      text: "Typing...",
-      sender: "bot",
-      timestamp: new Date(),
-    }
-    setMessages((prev) => [...prev, typingMessage])
+    setMessages((prev) => {
+      // Don't add if typing indicator already exists
+      if (prev.some((msg) => msg.id === "typing")) {
+        return prev
+      }
+      
+      const typingMessage: Message = {
+        id: "typing",
+        text: "Typing...",
+        sender: "bot",
+        timestamp: new Date(),
+      }
+      return [...prev, typingMessage]
+    })
   }
 
   const removeTypingIndicator = () => {
@@ -117,73 +130,112 @@ export default function ChatPage() {
   }
 
   const handleSendMessage = async (text: string) => {
-    setError(null)
-    setInputValue("") // Clear input immediately
-    addUserMessage(text)
-    setIsLoading(true)
-    showTypingIndicator()
+    const sendAction = async () => {
+      setError(null)
+      setInputValue("") // Clear input immediately
+      addUserMessage(text)
+      setIsLoading(true)
+      showTypingIndicator()
 
-    try {
-      const response = await apiClient.sendMessage({
-        message: text,
-        sessionId,
-      })
+      try {
+        const response = await apiClient.sendMessage({
+          message: text,
+          sessionId,
+        })
 
-      removeTypingIndicator()
-      addBotMessage(response.response, response.audio_url)
-    } catch (err) {
-      removeTypingIndicator()
-      const errorMessage = err instanceof ApiError ? err.message : "Failed to send message. Please try again."
-      setError(errorMessage)
-      addBotMessage(`Sorry, I encountered an error: ${errorMessage}`)
-    } finally {
-      setIsLoading(false)
+        removeTypingIndicator()
+        addBotMessage(response.response, response.audio_url)
+        setConnectionStatus(ConnectionStatus.CONNECTED)
+        if (response.severity) {
+          setCurrentSeverity(response.severity)
+        }
+      } catch (err) {
+        removeTypingIndicator()
+        if (err instanceof ApiError) {
+          setError(err)
+          setConnectionStatus(ConnectionStatus.DISCONNECTED)
+          addBotMessage(`Sorry, I encountered an error: ${err.userMessage}`)
+        } else {
+          const genericError = new ApiError(0, "Failed to send message. Please try again.")
+          setError(genericError)
+          addBotMessage(`Sorry, I encountered an error: ${genericError.userMessage}`)
+        }
+      } finally {
+        setIsLoading(false)
+      }
     }
+
+    setLastFailedAction(() => sendAction)
+    await sendAction()
   }
 
   const handleVoiceRecording = async (audioBlob: Blob) => {
-    setError(null)
-    addUserMessage("🎤 Voice message")
-    setIsLoading(true)
-    showTypingIndicator()
+    const voiceAction = async () => {
+      setError(null)
+      addUserMessage("🎤 Voice message")
+      setIsLoading(true)
+      showTypingIndicator()
 
-    try {
-      const response = await apiClient.sendVoice(audioBlob)
+      try {
+        const response = await apiClient.sendVoice(audioBlob)
 
-      removeTypingIndicator()
-      addBotMessage(response.response, response.audio_url, response.transcription)
-    } catch (err) {
-      removeTypingIndicator()
-      const errorMessage = err instanceof ApiError ? err.message : "Failed to process voice message. Please try again."
-      setError(errorMessage)
-      addBotMessage(`Sorry, I encountered an error: ${errorMessage}`)
-    } finally {
-      setIsLoading(false)
+        removeTypingIndicator()
+        addBotMessage(response.response, response.audio_url, response.transcription)
+        setConnectionStatus(ConnectionStatus.CONNECTED)
+      } catch (err) {
+        removeTypingIndicator()
+        if (err instanceof ApiError) {
+          setError(err)
+          setConnectionStatus(ConnectionStatus.DISCONNECTED)
+          addBotMessage(`Sorry, I encountered an error: ${err.userMessage}`)
+        } else {
+          const genericError = new ApiError(0, "Failed to process voice message. Please try again.")
+          setError(genericError)
+          addBotMessage(`Sorry, I encountered an error: ${genericError.userMessage}`)
+        }
+      } finally {
+        setIsLoading(false)
+      }
     }
+
+    setLastFailedAction(() => voiceAction)
+    await voiceAction()
   }
 
   const handleImageSelect = async (file: File) => {
-    setError(null)
+    const imageAction = async () => {
+      setError(null)
 
-    // Create preview URL
-    const imageUrl = URL.createObjectURL(file)
-    addUserMessage("📸 Image uploaded", imageUrl)
-    setIsLoading(true)
-    showTypingIndicator()
+      // Create preview URL
+      const imageUrl = URL.createObjectURL(file)
+      addUserMessage("📸 Image uploaded", imageUrl)
+      setIsLoading(true)
+      showTypingIndicator()
 
-    try {
-      const response = await apiClient.uploadImage(file)
+      try {
+        const response = await apiClient.uploadImage(file)
 
-      removeTypingIndicator()
-      addBotMessage(response.response, response.audio_url)
-    } catch (err) {
-      removeTypingIndicator()
-      const errorMessage = err instanceof ApiError ? err.message : "Failed to process image. Please try again."
-      setError(errorMessage)
-      addBotMessage(`Sorry, I encountered an error: ${errorMessage}`)
-    } finally {
-      setIsLoading(false)
+        removeTypingIndicator()
+        addBotMessage(response.response, response.audio_url)
+        setConnectionStatus(ConnectionStatus.CONNECTED)
+      } catch (err) {
+        removeTypingIndicator()
+        if (err instanceof ApiError) {
+          setError(err)
+          setConnectionStatus(ConnectionStatus.DISCONNECTED)
+          addBotMessage(`Sorry, I encountered an error: ${err.userMessage}`)
+        } else {
+          const genericError = new ApiError(0, "Failed to process image. Please try again.")
+          setError(genericError)
+          addBotMessage(`Sorry, I encountered an error: ${genericError.userMessage}`)
+        }
+      } finally {
+        setIsLoading(false)
+      }
     }
+
+    setLastFailedAction(() => imageAction)
+    await imageAction()
   }
 
   const handlePlayAudio = (url: string) => {
@@ -200,7 +252,7 @@ export default function ChatPage() {
     const audio = new Audio(audioUrl)
     audio.play().catch((err) => {
       console.error("Failed to play audio:", err)
-      setError("Failed to play audio response")
+      setError(new ApiError(0, "Failed to play audio response"))
     })
 
     setCurrentAudio(audio)
@@ -213,8 +265,39 @@ export default function ChatPage() {
   }
 
   const handleError = (err: Error) => {
-    setError(err.message)
+    if (err instanceof ApiError) {
+      setError(err)
+    } else {
+      setError(new ApiError(0, err.message))
+    }
   }
+
+  const handleRetry = async () => {
+    if (lastFailedAction) {
+      await lastFailedAction()
+    }
+  }
+
+  const handleDismissError = () => {
+    setError(null)
+  }
+
+  // Periodic health check
+  useEffect(() => {
+    const checkConnection = async () => {
+      setConnectionStatus(ConnectionStatus.CHECKING)
+      const isAvailable = await apiClient.isBackendAvailable()
+      setConnectionStatus(isAvailable ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED)
+    }
+
+    // Initial check
+    checkConnection()
+
+    // Check every 30 seconds
+    const interval = setInterval(checkConnection, 30000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   // Symptom Analyzer handlers
   const addSymptom = (symptom: string) => {
@@ -231,43 +314,63 @@ export default function ChatPage() {
   const analyzeSymptoms = async () => {
     if (symptoms.length === 0) return
     
-    setIsAnalyzing(true)
-    setError(null)
-    
-    try {
-      const symptomText = symptoms.join(", ")
-      const response = await apiClient.sendMessage({
-        message: `Analyze these symptoms: ${symptomText}`,
-        sessionId: sessionId
-      })
-      setSymptomAnalysis(response.response)
-    } catch (err) {
-      const error = err as ApiError
-      setError(error.message)
-    } finally {
-      setIsAnalyzing(false)
+    const analyzeAction = async () => {
+      setIsAnalyzing(true)
+      setError(null)
+      
+      try {
+        const symptomText = symptoms.join(", ")
+        const response = await apiClient.sendMessage({
+          message: `Analyze these symptoms: ${symptomText}`,
+          sessionId: sessionId
+        })
+        setSymptomAnalysis(response.response)
+        setConnectionStatus(ConnectionStatus.CONNECTED)
+      } catch (err) {
+        if (err instanceof ApiError) {
+          setError(err)
+          setConnectionStatus(ConnectionStatus.DISCONNECTED)
+        } else {
+          setError(new ApiError(0, "Failed to analyze symptoms"))
+        }
+      } finally {
+        setIsAnalyzing(false)
+      }
     }
+
+    setLastFailedAction(() => analyzeAction)
+    await analyzeAction()
   }
 
   // Medication Explorer handlers
   const searchMedication = async (medName: string) => {
     if (!medName.trim()) return
     
-    setIsSearchingMed(true)
-    setError(null)
-    
-    try {
-      const response = await apiClient.sendMessage({
-        message: `Tell me about the medication: ${medName}`,
-        sessionId: sessionId
-      })
-      setMedicationInfo(response.response)
-    } catch (err) {
-      const error = err as ApiError
-      setError(error.message)
-    } finally {
-      setIsSearchingMed(false)
+    const searchAction = async () => {
+      setIsSearchingMed(true)
+      setError(null)
+      
+      try {
+        const response = await apiClient.sendMessage({
+          message: `Tell me about the medication: ${medName}`,
+          sessionId: sessionId
+        })
+        setMedicationInfo(response.response)
+        setConnectionStatus(ConnectionStatus.CONNECTED)
+      } catch (err) {
+        if (err instanceof ApiError) {
+          setError(err)
+          setConnectionStatus(ConnectionStatus.DISCONNECTED)
+        } else {
+          setError(new ApiError(0, "Failed to search medication"))
+        }
+      } finally {
+        setIsSearchingMed(false)
+      }
     }
+
+    setLastFailedAction(() => searchAction)
+    await searchAction()
   }
 
   return (
@@ -372,11 +475,17 @@ export default function ChatPage() {
 
           {/* Input Area */}
           <div className="chat-input-area">
-          {error && (
-            <div className="error-message" style={{ marginBottom: "1rem", color: "var(--error)", fontSize: "0.9rem" }}>
-              ⚠️ {error}
-            </div>
+          {currentSeverity && (
+            <SeverityIndicator severity={currentSeverity} />
           )}
+          
+          <ErrorBanner
+            error={error}
+            onRetry={handleRetry}
+            onDismiss={handleDismissError}
+            connectionStatus={connectionStatus}
+            showTroubleshooting={true}
+          />
 
           <div className="quick-suggestions">
             <button className="suggestion-btn" onClick={() => handleSendMessage("I have a headache")}>
@@ -442,7 +551,16 @@ export default function ChatPage() {
                     ➕
                   </button>
                   <VoiceRecorder 
-                    onRecordingComplete={(text) => addSymptom(text)} 
+                    onRecordingComplete={async (audioBlob) => {
+                      try {
+                        const response = await apiClient.sendVoice(audioBlob, "")
+                        if (response.transcription) {
+                          addSymptom(response.transcription)
+                        }
+                      } catch (err) {
+                        handleError(err as Error)
+                      }
+                    }} 
                     onError={handleError} 
                   />
                   <ImageUploader 
@@ -602,9 +720,16 @@ export default function ChatPage() {
                     {isSearchingMed ? "Searching..." : "Search"}
                   </button>
                   <VoiceRecorder
-                    onRecordingComplete={(text) => {
-                      setMedicationSearch(text)
-                      searchMedication(text)
+                    onRecordingComplete={async (audioBlob) => {
+                      try {
+                        const response = await apiClient.sendVoice(audioBlob, "")
+                        if (response.transcription) {
+                          setMedicationSearch(response.transcription)
+                          searchMedication(response.transcription)
+                        }
+                      } catch (err) {
+                        handleError(err as Error)
+                      }
                     }}
                     onError={handleError}
                   />
@@ -688,7 +813,13 @@ export default function ChatPage() {
         {/* Settings View */}
         {activeView === "settings" && (
           <div className="view-content">
-            <h3>Settings</h3>
+            <h3>Settings & Metrics</h3>
+            
+            <div className="settings-group">
+              <h4>System Performance</h4>
+              <MetricsDashboard />
+            </div>
+            
             <div className="settings-group">
               <h4>Privacy</h4>
               <p style={{ color: "var(--text-secondary)", marginBottom: "1rem" }}>
@@ -699,7 +830,7 @@ export default function ChatPage() {
               <h4>About</h4>
               <p style={{ color: "var(--text-secondary)" }}>
                 MediChat - Your AI Health Assistant<br />
-                Version 1.0.0
+                Version 1.0.0 (Enhanced with ML Metrics & Severity Classification)
               </p>
             </div>
           </div>
