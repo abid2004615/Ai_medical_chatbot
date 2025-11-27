@@ -132,16 +132,27 @@ class MedicalQuestionGenerator:
         
         combined_text = symptom_lower + " " + history_text
         
+        # Enhanced age detection - check for numbers followed by age indicators or age ranges
+        import re
+        age_patterns = [
+            r'\b\d{1,3}\s*(?:years?\s*old|yrs?\s*old|y\.?o\.?)\b',  # "25 years old", "25 yrs old", "25 y.o"
+            r'\b(?:i\'m|i\s+am|im)\s+\d{1,3}\b',  # "I'm 25", "I am 25"
+            r'\bage[:\s]+\d{1,3}\b',  # "age: 25", "age 25"
+            r'\b\d{1,3}\s*year\b',  # "25 year"
+            r'\b(?:child|kid|baby|infant|toddler|teenager|teen|adult|senior|elderly)\b',  # Age groups
+        ]
+        has_age = any(re.search(pattern, combined_text, re.IGNORECASE) for pattern in age_patterns)
+        
         return {
-            'onset_time': any(word in combined_text for word in ['started', 'began', 'since', 'ago', 'yesterday', 'today']),
-            'severity': any(word in combined_text for word in ['severe', 'mild', 'moderate', 'scale', '/10']),
-            'duration': any(word in combined_text for word in ['hours', 'days', 'weeks', 'constant', 'intermittent']),
-            'location': any(word in combined_text for word in ['left', 'right', 'upper', 'lower', 'side', 'area']),
-            'aggravating_factors': any(word in combined_text for word in ['worse', 'better', 'when', 'after', 'during']),
-            'associated_symptoms': any(word in combined_text for word in ['also', 'along with', 'and', 'plus']),
-            'medical_history': any(word in combined_text for word in ['condition', 'disease', 'diagnosed', 'history']),
-            'medications': any(word in combined_text for word in ['taking', 'medication', 'medicine', 'drug', 'pill']),
-            'age': any(word in combined_text for word in ['years old', 'age', 'old']),
+            'onset_time': any(word in combined_text for word in ['started', 'began', 'since', 'ago', 'yesterday', 'today', 'morning', 'night', 'week']),
+            'severity': any(word in combined_text for word in ['severe', 'mild', 'moderate', 'scale', '/10', 'bad', 'terrible', 'slight']),
+            'duration': any(word in combined_text for word in ['hours', 'days', 'weeks', 'constant', 'intermittent', 'continuous', 'ongoing']),
+            'location': any(word in combined_text for word in ['left', 'right', 'upper', 'lower', 'side', 'area', 'front', 'back']),
+            'aggravating_factors': any(word in combined_text for word in ['worse', 'better', 'when', 'after', 'during', 'triggers']),
+            'associated_symptoms': any(word in combined_text for word in ['also', 'along with', 'and', 'plus', 'additionally']),
+            'medical_history': any(word in combined_text for word in ['condition', 'disease', 'diagnosed', 'history', 'chronic']),
+            'medications': any(word in combined_text for word in ['taking', 'medication', 'medicine', 'drug', 'pill', 'prescription']),
+            'age': has_age,
         }
     
     @staticmethod
@@ -161,6 +172,10 @@ class MedicalQuestionGenerator:
         # For emergency, don't ask questions - advise immediate care
         if severity_level == 'EMERGENCY':
             return []
+        
+        # HIGHEST PRIORITY - Age (critical for medication safety)
+        if not missing_info.get('age'):
+            questions.append("How old are you? (Important for safe medication dosing)")
         
         # High priority questions
         if not missing_info.get('severity'):
@@ -185,9 +200,6 @@ class MedicalQuestionGenerator:
         
         if not missing_info.get('medications'):
             questions.append("Are you currently taking any medications?")
-        
-        if not missing_info.get('age'):
-            questions.append("How old are you? (This helps provide age-appropriate advice)")
         
         # Return prioritized questions (will be asked one at a time)
         return questions

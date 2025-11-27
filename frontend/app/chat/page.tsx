@@ -1,870 +1,446 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
-import { ChatMessage, Message } from "@/components/chat/ChatMessage"
-import { ChatInput } from "@/components/chat/ChatInput"
-import { VoiceRecorder } from "@/components/chat/VoiceRecorder"
-import { ImageUploader } from "@/components/chat/ImageUploader"
-import { apiClient, getSessionId, ApiError, SeverityInfo } from "@/lib/api-client"
-import { ErrorBanner, ConnectionStatus } from "@/components/ErrorBanner"
-import { SeverityIndicator } from "@/components/SeverityIndicator"
-import { MetricsDashboard } from "@/components/MetricsDashboard"
+import { useState, useRef, useEffect } from "react";
+import { Send, Mic, MicOff, Volume2, VolumeX, Paperclip } from "lucide-react";
+import { EmergencyBanner } from "@/components/MedicalDisclaimer";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { useTextToSpeech } from "@/hooks/useTextToSpeech";
+
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  options?: string[];
+  progress?: {
+    current: number;
+    total: number;
+    percentage: number;
+  };
+}
 
 export default function ChatPage() {
-  const router = useRouter()
-  const [messages, setMessages] = useState<Message[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<ApiError | null>(null)
-  const [sessionId] = useState(() => getSessionId())
-  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null)
-  const [inputValue, setInputValue] = useState("")
-  const [activeView, setActiveView] = useState("chat")
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(ConnectionStatus.UNKNOWN)
-  const [lastFailedAction, setLastFailedAction] = useState<(() => Promise<void>) | null>(null)
-  const [currentSeverity, setCurrentSeverity] = useState<SeverityInfo | null>(null)
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "1",
+      role: "assistant",
+      content: "🏥 Hello! I'm your AI-powered health assistant.\n\nI can help you with ANY symptom - headache, ear pain, jaw pain, leg swelling, or anything else.\n\nJust tell me what symptom you're experiencing, and I'll ask you a few questions to provide personalized medical guidance.\n\nWhat symptom would you like to discuss?",
+      timestamp: new Date(),
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [sessionId] = useState(`session-${Date.now()}`);
+  const [assessmentStarted, setAssessmentStarted] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Symptom Analyzer states
-  const [symptoms, setSymptoms] = useState<string[]>([])
-  const [symptomInput, setSymptomInput] = useState("")
-  const [symptomAnalysis, setSymptomAnalysis] = useState<string>("")
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  
-  // Medication Explorer states
-  const [medicationSearch, setMedicationSearch] = useState("")
-  const [medicationInfo, setMedicationInfo] = useState<string>("")
-  const [isSearchingMed, setIsSearchingMed] = useState(false)
-
-  // Load messages from sessionStorage on mount
-  useEffect(() => {
-    const savedMessages = sessionStorage.getItem("chat_messages")
-    if (savedMessages) {
-      try {
-        const parsed = JSON.parse(savedMessages)
-        // Convert timestamp strings back to Date objects
-        const messagesWithDates = parsed.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp),
-        }))
-        
-        // Remove duplicate greetings if they exist
-        const uniqueMessages = messagesWithDates.filter((msg: Message, index: number) => {
-          if (index === 0) return true // Keep first message
-          // Remove if it's a duplicate greeting
-          const isGreeting = msg.text.includes("How are you doing today")
-          const prevIsGreeting = messagesWithDates[index - 1]?.text.includes("How are you doing today")
-          return !(isGreeting && prevIsGreeting)
-        })
-        
-        setMessages(uniqueMessages)
-      } catch (e) {
-        console.error("Failed to load messages:", e)
-      }
-    } else {
-      // Add welcome message if no history
-      addBotMessage(
-        "Hi! How are you doing today? What's on your mind? Do you have a health concern or just want to chat? I'm here to listen and help if I can."
-      )
-    }
-  }, [])
-
-  // Save messages to sessionStorage whenever they change
-  useEffect(() => {
-    if (messages.length > 0) {
-      sessionStorage.setItem("chat_messages", JSON.stringify(messages))
-    }
-  }, [messages])
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+  // Voice hooks
+  const { isListening, startListening, stopListening, error: speechError } = useSpeechRecognition();
+  const { isSpeaking, speak, stop: stopSpeaking, error: ttsError } = useTextToSpeech();
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-  const addUserMessage = (text: string, imageUrl?: string) => {
-    const newMessage: Message = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      text,
-      sender: "user",
-      timestamp: new Date(),
-      imageUrl,
-    }
-    setMessages((prev) => [...prev, newMessage])
-  }
-
-  const addBotMessage = (text: string, audioUrl?: string, transcription?: string) => {
-    const newMessage: Message = {
-      id: `bot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      text,
-      sender: "bot",
-      timestamp: new Date(),
-      audioUrl,
-      transcription,
-    }
-    setMessages((prev) => [...prev, newMessage])
-  }
-
-  const showTypingIndicator = () => {
-    setMessages((prev) => {
-      // Don't add if typing indicator already exists
-      if (prev.some((msg) => msg.id === "typing")) {
-        return prev
-      }
-      
-      const typingMessage: Message = {
-        id: "typing",
-        text: "Typing...",
-        sender: "bot",
-        timestamp: new Date(),
-      }
-      return [...prev, typingMessage]
-    })
-  }
-
-  const removeTypingIndicator = () => {
-    setMessages((prev) => prev.filter((msg) => msg.id !== "typing"))
-  }
-
-  const handleSendMessage = async (text: string) => {
-    const sendAction = async () => {
-      setError(null)
-      setInputValue("") // Clear input immediately
-      addUserMessage(text)
-      setIsLoading(true)
-      showTypingIndicator()
-
-      try {
-        const response = await apiClient.sendMessage({
-          message: text,
-          sessionId,
-        })
-
-        removeTypingIndicator()
-        addBotMessage(response.response, response.audio_url)
-        setConnectionStatus(ConnectionStatus.CONNECTED)
-        if (response.severity) {
-          setCurrentSeverity(response.severity)
-        }
-      } catch (err) {
-        removeTypingIndicator()
-        if (err instanceof ApiError) {
-          setError(err)
-          setConnectionStatus(ConnectionStatus.DISCONNECTED)
-          addBotMessage(`Sorry, I encountered an error: ${err.userMessage}`)
-        } else {
-          const genericError = new ApiError(0, "Failed to send message. Please try again.")
-          setError(genericError)
-          addBotMessage(`Sorry, I encountered an error: ${genericError.userMessage}`)
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    setLastFailedAction(() => sendAction)
-    await sendAction()
-  }
-
-  const handleVoiceRecording = async (audioBlob: Blob) => {
-    const voiceAction = async () => {
-      setError(null)
-      addUserMessage("🎤 Voice message")
-      setIsLoading(true)
-      showTypingIndicator()
-
-      try {
-        const response = await apiClient.sendVoice(audioBlob)
-
-        removeTypingIndicator()
-        addBotMessage(response.response, response.audio_url, response.transcription)
-        setConnectionStatus(ConnectionStatus.CONNECTED)
-      } catch (err) {
-        removeTypingIndicator()
-        if (err instanceof ApiError) {
-          setError(err)
-          setConnectionStatus(ConnectionStatus.DISCONNECTED)
-          addBotMessage(`Sorry, I encountered an error: ${err.userMessage}`)
-        } else {
-          const genericError = new ApiError(0, "Failed to process voice message. Please try again.")
-          setError(genericError)
-          addBotMessage(`Sorry, I encountered an error: ${genericError.userMessage}`)
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    setLastFailedAction(() => voiceAction)
-    await voiceAction()
-  }
-
-  const handleImageSelect = async (file: File) => {
-    const imageAction = async () => {
-      setError(null)
-
-      // Create preview URL
-      const imageUrl = URL.createObjectURL(file)
-      addUserMessage("📸 Image uploaded", imageUrl)
-      setIsLoading(true)
-      showTypingIndicator()
-
-      try {
-        const response = await apiClient.uploadImage(file)
-
-        removeTypingIndicator()
-        addBotMessage(response.response, response.audio_url)
-        setConnectionStatus(ConnectionStatus.CONNECTED)
-      } catch (err) {
-        removeTypingIndicator()
-        if (err instanceof ApiError) {
-          setError(err)
-          setConnectionStatus(ConnectionStatus.DISCONNECTED)
-          addBotMessage(`Sorry, I encountered an error: ${err.userMessage}`)
-        } else {
-          const genericError = new ApiError(0, "Failed to process image. Please try again.")
-          setError(genericError)
-          addBotMessage(`Sorry, I encountered an error: ${genericError.userMessage}`)
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    setLastFailedAction(() => imageAction)
-    await imageAction()
-  }
-
-  const handlePlayAudio = (url: string) => {
-    // Stop current audio if playing
-    if (currentAudio) {
-      currentAudio.pause()
-      currentAudio.currentTime = 0
-    }
-
-    // Build full URL if it's a relative path
-    const audioUrl = url.startsWith("http") ? url : `http://localhost:5000${url}`
-
-    // Create and play new audio
-    const audio = new Audio(audioUrl)
-    audio.play().catch((err) => {
-      console.error("Failed to play audio:", err)
-      setError(new ApiError(0, "Failed to play audio response"))
-    })
-
-    setCurrentAudio(audio)
-  }
-
-  const handleCopyText = (text: string) => {
-    navigator.clipboard.writeText(text).catch((err) => {
-      console.error("Failed to copy:", err)
-    })
-  }
-
-  const handleError = (err: Error) => {
-    if (err instanceof ApiError) {
-      setError(err)
-    } else {
-      setError(new ApiError(0, err.message))
-    }
-  }
-
-  const handleRetry = async () => {
-    if (lastFailedAction) {
-      await lastFailedAction()
-    }
-  }
-
-  const handleDismissError = () => {
-    setError(null)
-  }
-
-  // Periodic health check
   useEffect(() => {
-    const checkConnection = async () => {
-      setConnectionStatus(ConnectionStatus.CHECKING)
-      const isAvailable = await apiClient.isBackendAvailable()
-      setConnectionStatus(isAvailable ? ConnectionStatus.CONNECTED : ConnectionStatus.DISCONNECTED)
-    }
+    scrollToBottom();
+  }, [messages]);
 
-    // Initial check
-    checkConnection()
-
-    // Check every 30 seconds
-    const interval = setInterval(checkConnection, 30000)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  // Symptom Analyzer handlers
-  const addSymptom = (symptom: string) => {
-    if (symptom.trim() && !symptoms.includes(symptom.trim())) {
-      setSymptoms([...symptoms, symptom.trim()])
-      setSymptomInput("")
-    }
-  }
-
-  const removeSymptom = (symptom: string) => {
-    setSymptoms(symptoms.filter(s => s !== symptom))
-  }
-
-  const analyzeSymptoms = async () => {
-    if (symptoms.length === 0) return
-    
-    const analyzeAction = async () => {
-      setIsAnalyzing(true)
-      setError(null)
-      
-      try {
-        const symptomText = symptoms.join(", ")
-        const response = await apiClient.sendMessage({
-          message: `Analyze these symptoms: ${symptomText}`,
-          sessionId: sessionId
-        })
-        setSymptomAnalysis(response.response)
-        setConnectionStatus(ConnectionStatus.CONNECTED)
-      } catch (err) {
-        if (err instanceof ApiError) {
-          setError(err)
-          setConnectionStatus(ConnectionStatus.DISCONNECTED)
-        } else {
-          setError(new ApiError(0, "Failed to analyze symptoms"))
-        }
-      } finally {
-        setIsAnalyzing(false)
+  // Auto-speak assistant messages if enabled
+  useEffect(() => {
+    if (autoSpeak && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === "assistant" && !isLoading) {
+        speak(lastMessage.content);
       }
     }
+  }, [messages, autoSpeak, isLoading, speak]);
 
-    setLastFailedAction(() => analyzeAction)
-    await analyzeAction()
-  }
+  const handleVoiceInput = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening((transcript) => {
+        setInput(transcript);
+      });
+    }
+  };
 
-  // Medication Explorer handlers
-  const searchMedication = async (medName: string) => {
-    if (!medName.trim()) return
-    
-    const searchAction = async () => {
-      setIsSearchingMed(true)
-      setError(null)
+  const toggleAutoSpeak = () => {
+    if (isSpeaking) {
+      stopSpeaking();
+    }
+    setAutoSpeak(!autoSpeak);
+  };
+
+  const startAssessment = async (symptom: string) => {
+    try {
+      const response = await fetch("http://localhost:5000/api/dynamic/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          symptom: symptom,
+          session_id: sessionId 
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to start assessment");
+
+      const data = await response.json();
       
-      try {
-        const response = await apiClient.sendMessage({
-          message: `Tell me about the medication: ${medName}`,
-          sessionId: sessionId
-        })
-        setMedicationInfo(response.response)
-        setConnectionStatus(ConnectionStatus.CONNECTED)
-      } catch (err) {
-        if (err instanceof ApiError) {
-          setError(err)
-          setConnectionStatus(ConnectionStatus.DISCONNECTED)
-        } else {
-          setError(new ApiError(0, "Failed to search medication"))
-        }
-      } finally {
-        setIsSearchingMed(false)
+      if (data.success) {
+        setAssessmentStarted(true);
+        
+        const questionText = data.question?.text || "";
+        const messageContent = data.message 
+          ? `${data.message}\n\n${questionText}` 
+          : `Let's assess your ${symptom}. I'll ask you a few questions.\n\n${questionText}`;
+        
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: messageContent,
+          timestamp: new Date(),
+          options: data.question?.options || [],
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
       }
+    } catch (error) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Sorry, I'm having trouble starting the assessment. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  const answerQuestion = async (answer: string) => {
+    try {
+      const response = await fetch("http://localhost:5000/api/dynamic/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          answer: answer,
+          session_id: sessionId 
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to process answer");
+
+      const data = await response.json();
+      
+      if (data.success) {
+        if (data.status === "continue") {
+          // More questions to answer
+          const questionText = data.question?.text || "Next question:";
+          const messageContent = data.message 
+            ? `${data.message}\n\n${questionText}` 
+            : questionText;
+          
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: messageContent,
+            timestamp: new Date(),
+            options: data.question?.options || [],
+            progress: data.progress,
+          };
+
+          setMessages((prev) => [...prev, assistantMessage]);
+        } else if (data.status === "complete") {
+          // Assessment complete - show analysis
+          setAssessmentStarted(false);
+          
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: data.formatted_response || "Assessment complete!",
+            timestamp: new Date(),
+          };
+
+          setMessages((prev) => [...prev, assistantMessage]);
+          
+          // Add option to start new assessment
+          setTimeout(() => {
+            const newAssessmentMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              role: "assistant",
+              content: "Would you like to check another symptom?",
+              timestamp: new Date(),
+              options: ["Yes, check another symptom", "No, I'm done"],
+            };
+            setMessages((prev) => [...prev, newAssessmentMessage]);
+          }, 1000);
+        }
+      }
+    } catch (error) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Sorry, I'm having trouble processing your answer. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    const messageText = input;
+    setInput("");
+    setIsLoading(true);
+
+    try {
+      if (!assessmentStarted) {
+        // Start new assessment with the symptom
+        await startAssessment(messageText);
+      } else {
+        // Answer current question
+        await answerQuestion(messageText);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleOptionClick = async (option: string) => {
+    if (isLoading) return;
+
+    // Check if user wants to start new assessment
+    if (option === "Yes, check another symptom") {
+      setMessages([
+        {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: "Great! What symptom would you like to discuss?",
+          timestamp: new Date(),
+        },
+      ]);
+      setAssessmentStarted(false);
+      return;
     }
 
-    setLastFailedAction(() => searchAction)
-    await searchAction()
-  }
+    if (option === "No, I'm done") {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: "Thank you for using the AI Health Assistant. Take care and feel better soon! 💚",
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
+    // Add user message with the selected option
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: option,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    try {
+      await answerQuestion(option);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
-    <div className="chat-container">
-      {/* Sidebar */}
-      <div className="sidebar">
-        <div className="sidebar-header">
-          <button 
-            onClick={() => router.push('/')}
-            className="back-btn-sidebar"
-            title="Back to home"
-          >
-            ← Back
-          </button>
-        </div>
+    <div className="flex h-screen bg-gray-100">
+      {/* MAIN CHAT AREA */}
+      <div className="flex-1 flex flex-col bg-[#F5F7FA]">
+        {/* Emergency Banner */}
+        <EmergencyBanner />
 
-        <nav className="sidebar-nav">
-          <button 
-            className={`nav-item ${activeView === "chat" ? "active" : ""}`}
-            onClick={() => setActiveView("chat")}
-          >
-            <span className="icon">💬</span>
-            <span>Chat</span>
-          </button>
-          <button 
-            className={`nav-item ${activeView === "symptom-checker" ? "active" : ""}`}
-            onClick={() => setActiveView("symptom-checker")}
-          >
-            <span className="icon">🔍</span>
-            <span>Symptom Checker</span>
-          </button>
-          <button 
-            className={`nav-item ${activeView === "health-records" ? "active" : ""}`}
-            onClick={() => setActiveView("health-records")}
-          >
-            <span className="icon">📋</span>
-            <span>Health Records</span>
-          </button>
-          <button 
-            className={`nav-item ${activeView === "medications" ? "active" : ""}`}
-            onClick={() => setActiveView("medications")}
-          >
-            <span className="icon">💊</span>
-            <span>Medications</span>
-          </button>
-        </nav>
-
-        <div className="sidebar-footer">
-        </div>
-      </div>
-
-      {/* Chat Main Area */}
-      <div className="chat-main">
         {/* Header */}
-        <div className="chat-header">
-          <div className="header-left">
-            <div className="header-logo">
-              <span className="logo-icon">⚕️</span>
-              <span className="logo-text">MediChat</span>
+        <div className="px-4 py-3 bg-white border-b border-gray-200 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-full bg-teal-500 flex items-center justify-center">
+              <span className="text-white text-xl">🏥</span>
             </div>
-            <h1 className="page-title">
-              {activeView === "chat" && "Chat"}
-              {activeView === "symptom-checker" && "Symptom Checker"}
-              {activeView === "health-records" && "Health Records"}
-              {activeView === "medications" && "Medications"}
-              {activeView === "settings" && "Settings"}
-              {activeView === "help" && "Help"}
-            </h1>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">AI Health Assistant</h1>
+              <p className="text-xs font-medium text-gray-600">
+                {isListening ? "🎤 Listening..." : isSpeaking ? "🔊 Speaking..." : "Online • Ready to help"}
+              </p>
+            </div>
           </div>
-          <div className="header-actions">
-            <button 
-              className={`header-action-btn ${activeView === "settings" ? "active" : ""}`}
-              onClick={() => setActiveView("settings")}
-              title="Settings"
+          
+          {/* Voice Controls */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleAutoSpeak}
+              className={`p-2 rounded-lg transition ${
+                autoSpeak
+                  ? "bg-teal-100 text-teal-600"
+                  : "text-gray-500 hover:bg-gray-100"
+              }`}
+              title={autoSpeak ? "Auto-speak enabled" : "Auto-speak disabled"}
             >
-              <span className="icon">⚙️</span>
-            </button>
-            <button 
-              className={`header-action-btn ${activeView === "help" ? "active" : ""}`}
-              onClick={() => setActiveView("help")}
-              title="Help"
-            >
-              <span className="icon">❓</span>
+              {autoSpeak ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
             </button>
           </div>
         </div>
 
-        {/* Chat View */}
-        {activeView === "chat" && (
-        <>
-          <div className="chat-messages">
-            {messages.map((message) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                onPlayAudio={handlePlayAudio}
-                onCopyText={handleCopyText}
-              />
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="chat-input-area">
-          {currentSeverity && (
-            <SeverityIndicator severity={currentSeverity} />
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+                  message.role === "user"
+                    ? "bg-teal-500 text-white"
+                    : "bg-white text-gray-900 shadow-sm"
+                }`}
+              >
+                <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                
+                {/* Progress indicator */}
+                {message.progress && (
+                  <div className="mt-3 mb-2">
+                    <div className="flex justify-between text-xs text-gray-600 mb-1">
+                      <span>Progress</span>
+                      <span>{message.progress.percentage}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-teal-500 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${message.progress.percentage}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Show option buttons for assistant messages */}
+                {message.role === "assistant" && message.options && message.options.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {message.options.map((option, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleOptionClick(option)}
+                        disabled={isLoading}
+                        className="px-3 py-2 text-sm font-semibold bg-teal-50 text-teal-800 rounded-lg hover:bg-teal-100 hover:shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed border-2 border-teal-300"
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                
+                <p
+                  className={`text-xs mt-1 font-medium ${
+                    message.role === "user" ? "text-teal-100" : "text-gray-500"
+                  }`}
+                  suppressHydrationWarning
+                >
+                  {message.timestamp.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+            </div>
+          ))}
+          
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
+                </div>
+              </div>
+            </div>
           )}
           
-          <ErrorBanner
-            error={error}
-            onRetry={handleRetry}
-            onDismiss={handleDismissError}
-            connectionStatus={connectionStatus}
-            showTroubleshooting={true}
-          />
+          <div ref={messagesEndRef} />
+        </div>
 
-          <div className="quick-suggestions">
-            <button className="suggestion-btn" onClick={() => handleSendMessage("I have a headache")}>
-              I have a headache
-            </button>
-            <button className="suggestion-btn" onClick={() => handleSendMessage("Check my medications")}>
-              Check my medications
-            </button>
-          </div>
-
-          <div className="input-bar">
-            <VoiceRecorder onRecordingComplete={handleVoiceRecording} onError={handleError} />
-            <ChatInput
-              value={inputValue}
-              onChange={setInputValue}
-              onSendMessage={handleSendMessage}
-              isLoading={isLoading}
-              placeholder="Type your message..."
-            />
-            <ImageUploader onImageSelect={handleImageSelect} onError={handleError} />
-            <button
-              onClick={() => {
-                if (inputValue.trim()) {
-                  handleSendMessage(inputValue.trim())
-                  setInputValue("")
-                }
-              }}
-              disabled={!inputValue.trim() || isLoading}
-              className="btn-icon send-btn"
-              title="Send message"
-            >
-              {isLoading ? "⏳" : "📤"}
-            </button>
-          </div>
-          </div>
-        </>
-        )}
-
-        {/* Symptom Analyzer View */}
-        {activeView === "symptom-checker" && (
-          <div className="analyzer-container">
-            <div className="analyzer-left">
-              <div className="analyzer-header">
-                <h2>Symptom Analyzer</h2>
-                <p>Enter, speak, or upload symptoms for instant medical guidance</p>
+        {/* Input Area */}
+        <div className="border-t border-gray-200 bg-white px-4 py-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-end gap-2">
+              <button className="p-2 text-gray-500 hover:text-teal-500 transition">
+                <Paperclip className="w-5 h-5" />
+              </button>
+              
+              <div className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 flex items-center gap-2">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={isListening ? "Listening..." : assessmentStarted ? "Type or speak your answer..." : "Type or speak your symptom..."}
+                  className="flex-1 bg-transparent outline-none resize-none max-h-32 text-sm font-medium text-gray-900 placeholder:text-gray-500"
+                  rows={1}
+                  disabled={isLoading || isListening}
+                />
               </div>
 
-              <div className="symptom-input-section">
-                <div className="input-with-actions">
-                  <input
-                    type="text"
-                    value={symptomInput}
-                    onChange={(e) => setSymptomInput(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && addSymptom(symptomInput)}
-                    placeholder="Type a symptom (e.g., fever, headache)..."
-                    className="symptom-search-input"
-                  />
-                  <button 
-                    onClick={() => addSymptom(symptomInput)}
-                    className="btn-icon"
-                    title="Add symptom"
-                  >
-                    ➕
-                  </button>
-                  <VoiceRecorder 
-                    onRecordingComplete={async (audioBlob) => {
-                      try {
-                        const response = await apiClient.sendVoice(audioBlob, "")
-                        if (response.transcription) {
-                          addSymptom(response.transcription)
-                        }
-                      } catch (err) {
-                        handleError(err as Error)
-                      }
-                    }} 
-                    onError={handleError} 
-                  />
-                  <ImageUploader 
-                    onImageSelect={async (file) => {
-                      setIsAnalyzing(true)
-                      try {
-                        const response = await apiClient.sendMessage({
-                          message: "Analyze this medical image and describe any visible symptoms",
-                          sessionId: sessionId,
-                          image: file
-                        })
-                        setSymptomAnalysis(response.response)
-                      } catch (err) {
-                        handleError(err as Error)
-                      } finally {
-                        setIsAnalyzing(false)
-                      }
-                    }}
-                    onError={handleError}
-                  />
-                </div>
-
-                <div className="common-symptoms">
-                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}>
-                    Quick add:
-                  </p>
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                    {["Fever", "Headache", "Cough", "Sore throat", "Fatigue", "Nausea"].map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => addSymptom(s)}
-                        className="quick-symptom-btn"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {symptoms.length > 0 && (
-                  <div className="symptom-tags">
-                    <p style={{ fontSize: "0.875rem", fontWeight: "600", marginBottom: "0.5rem" }}>
-                      Selected Symptoms:
-                    </p>
-                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                      {symptoms.map((symptom) => (
-                        <div key={symptom} className="symptom-tag">
-                          <span>{symptom}</span>
-                          <button onClick={() => removeSymptom(symptom)} className="remove-tag">
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={analyzeSymptoms}
-                      disabled={isAnalyzing}
-                      className="btn-primary"
-                      style={{ marginTop: "1rem" }}
-                    >
-                      {isAnalyzing ? "Analyzing..." : "Analyze Symptoms"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="analyzer-right">
-              <div className="analysis-panel">
-                <h3>AI Analysis</h3>
-                {isAnalyzing && (
-                  <div className="loading-animation">
-                    <div className="typing-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <p>Analyzing your symptoms...</p>
-                  </div>
-                )}
-                {symptomAnalysis && !isAnalyzing && (
-                  <div className="analysis-result">
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: "1.6" }}>
-                      {symptomAnalysis}
-                    </div>
-                    <div className="safety-notice">
-                      ⚠️ If symptoms worsen, please consult a medical professional.
-                    </div>
-                  </div>
-                )}
-                {!symptomAnalysis && !isAnalyzing && (
-                  <div className="empty-state">
-                    <p>Add symptoms and click "Analyze Symptoms" to get AI-powered medical guidance.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Health Records View */}
-        {activeView === "health-records" && (
-          <div className="view-content">
-            <h3>Your Health Records</h3>
-            <p style={{ color: "var(--text-secondary)", marginBottom: "2rem" }}>
-              Your conversation history is saved locally in your browser.
-            </p>
-            <div className="records-section">
-              <h4>Recent Consultations</h4>
-              <p style={{ color: "var(--text-tertiary)" }}>
-                {messages.length > 0 
-                  ? `You have ${messages.length} messages in your current session.`
-                  : "No consultation history yet. Start a chat to begin!"}
-              </p>
-              <button 
-                className="btn-secondary" 
-                onClick={() => {
-                  if (confirm("Are you sure you want to clear all chat history?")) {
-                    sessionStorage.removeItem("chat_messages");
-                    setMessages([]);
-                    setActiveView("chat");
-                  }
-                }}
-                style={{ marginTop: "1rem" }}
+              <button
+                onClick={handleVoiceInput}
+                disabled={isLoading}
+                className={`p-2 rounded-lg transition ${
+                  isListening
+                    ? "bg-red-500 text-white animate-pulse"
+                    : "text-gray-500 hover:text-teal-500 hover:bg-gray-100"
+                }`}
+                title={isListening ? "Stop listening" : "Start voice input"}
               >
-                Clear Chat History
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() || isLoading}
+                className="p-3 bg-teal-500 text-white rounded-full hover:bg-teal-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                <Send className="w-5 h-5" />
               </button>
             </div>
-          </div>
-        )}
-
-        {/* Medication Explorer View */}
-        {activeView === "medications" && (
-          <div className="analyzer-container">
-            <div className="analyzer-left">
-              <div className="analyzer-header">
-                <h2>Medication Explorer</h2>
-                <p>Search medicines and get safe, non-prescription medical information</p>
-              </div>
-
-              <div className="medication-search-section">
-                <div className="input-with-actions">
-                  <input
-                    type="text"
-                    value={medicationSearch}
-                    onChange={(e) => setMedicationSearch(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && searchMedication(medicationSearch)}
-                    placeholder="Search for a medication (e.g., Aspirin, Ibuprofen)..."
-                    className="symptom-search-input"
-                  />
-                  <button
-                    onClick={() => searchMedication(medicationSearch)}
-                    disabled={isSearchingMed || !medicationSearch.trim()}
-                    className="btn-primary"
-                    style={{ padding: "0.75rem 1.5rem" }}
-                  >
-                    {isSearchingMed ? "Searching..." : "Search"}
-                  </button>
-                  <VoiceRecorder
-                    onRecordingComplete={async (audioBlob) => {
-                      try {
-                        const response = await apiClient.sendVoice(audioBlob, "")
-                        if (response.transcription) {
-                          setMedicationSearch(response.transcription)
-                          searchMedication(response.transcription)
-                        }
-                      } catch (err) {
-                        handleError(err as Error)
-                      }
-                    }}
-                    onError={handleError}
-                  />
-                </div>
-
-                <div className="common-medications">
-                  <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}>
-                    Common medications:
-                  </p>
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                    {[
-                      "Aspirin",
-                      "Ibuprofen",
-                      "Paracetamol",
-                      "Amoxicillin",
-                      "Cetirizine",
-                      "Omeprazole",
-                    ].map((med) => (
-                      <button
-                        key={med}
-                        onClick={() => {
-                          setMedicationSearch(med)
-                          searchMedication(med)
-                        }}
-                        className="quick-symptom-btn"
-                      >
-                        💊 {med}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="medication-info-notice">
-                  <div style={{ 
-                    background: "var(--primary-light)", 
-                    padding: "1rem", 
-                    borderRadius: "8px",
-                    marginTop: "1rem"
-                  }}>
-                    <p style={{ fontSize: "0.875rem", color: "var(--primary)", margin: 0 }}>
-                      ℹ️ This information is for educational purposes only. Always consult a doctor for dosage or prescription.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="analyzer-right">
-              <div className="analysis-panel">
-                <h3>Medication Information</h3>
-                {isSearchingMed && (
-                  <div className="loading-animation">
-                    <div className="typing-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <p>Searching medication database...</p>
-                  </div>
-                )}
-                {medicationInfo && !isSearchingMed && (
-                  <div className="analysis-result">
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: "1.6" }}>
-                      {medicationInfo}
-                    </div>
-                    <div className="safety-notice">
-                      ⚠️ Consult a doctor for dosage or prescription. Do not self-medicate.
-                    </div>
-                  </div>
-                )}
-                {!medicationInfo && !isSearchingMed && (
-                  <div className="empty-state">
-                    <p>Search for a medication to get detailed information about uses, side effects, and safety guidelines.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Settings View */}
-        {activeView === "settings" && (
-          <div className="view-content">
-            <h3>Settings & Metrics</h3>
             
-            <div className="settings-group">
-              <h4>System Performance</h4>
-              <MetricsDashboard />
-            </div>
+            {/* Error messages */}
+            {(speechError || ttsError) && (
+              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 text-center">
+                {speechError || ttsError}
+              </div>
+            )}
             
-            <div className="settings-group">
-              <h4>Privacy</h4>
-              <p style={{ color: "var(--text-secondary)", marginBottom: "1rem" }}>
-                Your conversations are stored locally in your browser and are not sent to any server except for AI processing.
-              </p>
-            </div>
-            <div className="settings-group">
-              <h4>About</h4>
-              <p style={{ color: "var(--text-secondary)" }}>
-                MediChat - Your AI Health Assistant<br />
-                Version 1.0.0 (Enhanced with ML Metrics & Severity Classification)
-              </p>
-            </div>
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              {isListening ? "🎤 Speak now..." : "⚠️ This is not a substitute for professional medical advice"}
+            </p>
           </div>
-        )}
-
-        {/* Help View */}
-        {activeView === "help" && (
-          <div className="view-content">
-            <h3>Help & Support</h3>
-            <div className="help-section">
-              <h4>How to use MediChat</h4>
-              <ul style={{ color: "var(--text-secondary)", lineHeight: "1.8" }}>
-                <li>Type your health questions or symptoms in the chat</li>
-                <li>Use voice recording to describe your symptoms</li>
-                <li>Upload images of medical reports or symptoms</li>
-                <li>Get instant AI-powered health guidance</li>
-              </ul>
-            </div>
-            <div className="help-section">
-              <h4>Important Disclaimer</h4>
-              <p style={{ color: "var(--text-secondary)" }}>
-                MediChat is an AI assistant for educational purposes only. It is not a replacement for professional medical advice. 
-                Always consult with healthcare providers for serious conditions or emergencies.
-              </p>
-            </div>
-            <div className="help-section">
-              <h4>Need More Help?</h4>
-              <button className="btn-primary" onClick={() => setActiveView("chat")}>
-                Start a Chat
-              </button>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
-  )
+  );
 }

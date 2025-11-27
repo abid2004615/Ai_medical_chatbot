@@ -1,0 +1,519 @@
+{
+  "medicine_map": {
+    "fever": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Paracetamol 500mg",
+            "dosage": "1 tablet every 6 hours",
+            "max_daily": "4 tablets (2000mg)",
+            "source": "WHO Essential Medicines, FDA-approved",
+            "safety": "Take with food, avoid alcohol"
+          }
+        ],
+        "child": [
+          {
+            "name": "Paracetamol Syrup",
+            "dosage": "10-15 mg/kg body weight",
+            "max_daily": "60 mg/kg in 24 hours",
+            "source": "Pediatric guidelines",
+            "safety": "Consult pediatrician for children under 2"
+          }
+        ]
+      },
+      "moderate": {
+        "adult": [
+          {
+            "name": "Paracetamol 650mg",
+            "dosage": "1 tablet every 6 hours",
+            "max_daily": "4 tablets (2600mg)",
+            "source": "WHO Essential Medicines",
+            "safety": "Avoid if liver disease"
+          },
+          {
+            "name": "Ibuprofen 200mg",
+            "dosage": "1-2 tablets every 6-8 hours",
+            "max_daily": "1200mg",
+            "source": "FDA-approved NSAID",
+            "safety": "Take with food, avoid if stomach ulcers"
+          }
+        ],
+        "child": [
+          {
+            "name": "Paracetamol Syrup",
+            "dosage": "15 mg/kg body weight",
+            "max_daily": "60 mg/kg",
+            "source": "Pediatric guidelines",
+            "safety": "No aspirin for children under 16"
+          }
+        ]
+      }
+    },
+    "headache": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Paracetamol 500mg",
+            "dosage": "1-2 tablets every 6 hours",
+            "max_daily": "4000mg",
+            "source": "First-line treatment per medical guidelines",
+            "safety": "Safe for most adults"
+          }
+        ]
+      },
+      "moderate": {
+        "adult": [
+          {
+            "name": "Ibuprofen 400mg",
+            "dosage": "1 tablet every 6-8 hours",
+            "max_daily": "1200mg",
+            "source": "Commonly prescribed by doctors",
+            "safety": "Take with food"
+          },
+          {
+            "name": "Paracetamol + Caffeine",
+            "dosage": "1-2 tablets as needed",
+            "max_daily": "6 tablets",
+            "source": "Effective for tension headaches",
+            "safety": "Avoid late evening (caffeine)"
+          }
+        ]
+      }
+    },
+    "cough_dry": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Dextromethorphan 15mg",
+            "dosage": "1 tablet every 6-8 hours",
+            "max_daily": "120mg",
+            "source": "FDA-approved cough suppressant",
+            "safety": "Avoid with MAO inhibitors"
+          }
+        ],
+        "child": [
+          {
+            "name": "Honey (for children over 1 year)",
+            "dosage": "1 teaspoon as needed",
+            "max_daily": "3-4 times daily",
+            "source": "Pediatric recommendation",
+            "safety": "Never for infants under 1 year"
+          }
+        ]
+      }
+    },
+    "cough_wet": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Guaifenesin 200mg",
+            "dosage": "1-2 tablets every 4 hours",
+            "max_daily": "2400mg",
+            "source": "FDA-approved expectorant",
+            "safety": "Drink plenty of water"
+          }
+        ]
+      }
+    },
+    "sore_throat": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Throat Lozenges",
+            "dosage": "1 lozenge every 2-3 hours",
+            "max_daily": "8 lozenges",
+            "source": "OTC symptomatic relief",
+            "safety": "Safe for most adults"
+          }
+        ]
+      }
+    },
+    "body_pain": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Paracetamol 500mg",
+            "dosage": "1-2 tablets every 6 hours",
+            "max_daily": "4000mg",
+            "source": "First-line analgesic",
+            "safety": "Safe for most conditions"
+          }
+        ],
+        "child": [
+          {
+            "name": "Paracetamol Syrup",
+            "dosage": "10-15 mg/kg body weight",
+            "max_daily": "60 mg/kg",
+            "source": "Pediatric pain relief",
+            "safety": "Safe for children over 2 months"
+          }
+        ]
+      },
+      "moderate": {
+        "adult": [
+          {
+            "name": "Ibuprofen 400mg",
+            "dosage": "1 tablet every 6-8 hours",
+            "max_daily": "1200mg",
+            "source": "Anti-inflammatory analgesic",
+            "safety": "Take with food"
+          }
+        ],
+        "child": [
+          {
+            "name": "Ibuprofen Suspension",
+            "dosage": "5-10 mg/kg every 6-8 hours",
+            "max_daily": "40 mg/kg",
+            "source": "Pediatric anti-inflammatory",
+            "safety": "For children over 6 months, take with food"
+          }
+        ]
+      }
+    },
+    "cold": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Cetirizine 10mg",
+            "dosage": "1 tablet once daily",
+            "max_daily": "10mg",
+            "source": "Antihistamine for cold symptoms",
+            "safety": "May cause drowsiness"
+          }
+        ],
+        "child": [
+          {
+            "name": "Cetirizine Syrup",
+            "dosage": "2.5-5mg once daily (age-dependent)",
+            "max_daily": "5mg for children under 6",
+            "source": "Pediatric antihistamine",
+            "safety": "Consult pediatrician for children under 2"
+          }
+        ]
+      }
+    },
+    "diarrhea": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Oral Rehydration Solution (ORS)",
+            "dosage": "1 sachet in 1 liter water, sip frequently",
+            "max_daily": "As needed for hydration",
+            "source": "WHO-recommended rehydration",
+            "safety": "Essential for preventing dehydration"
+          }
+        ],
+        "child": [
+          {
+            "name": "Oral Rehydration Solution (ORS)",
+            "dosage": "Small frequent sips after each loose stool",
+            "max_daily": "As needed",
+            "source": "Pediatric rehydration standard",
+            "safety": "Critical for children - prevents dehydration"
+          }
+        ]
+      }
+    },
+    "acidity": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Antacid (Calcium Carbonate)",
+            "dosage": "1-2 tablets as needed",
+            "max_daily": "8 tablets",
+            "source": "Fast-acting acid neutralizer",
+            "safety": "Take 1 hour after meals"
+          }
+        ]
+      },
+      "moderate": {
+        "adult": [
+          {
+            "name": "Omeprazole 20mg",
+            "dosage": "1 capsule once daily before breakfast",
+            "max_daily": "20mg",
+            "source": "Proton pump inhibitor",
+            "safety": "Take 30 minutes before first meal"
+          }
+        ]
+      }
+    },
+    "allergy": {
+      "mild": {
+        "adult": [
+          {
+            "name": "Cetirizine 10mg",
+            "dosage": "1 tablet once daily",
+            "max_daily": "10mg",
+            "source": "Non-drowsy antihistamine",
+            "safety": "May cause mild drowsiness"
+          },
+          {
+            "name": "Loratadine 10mg",
+            "dosage": "1 tablet once daily",
+            "max_daily": "10mg",
+            "source": "24-hour allergy relief",
+            "safety": "Non-drowsy formula"
+          }
+        ],
+        "child": [
+          {
+            "name": "Cetirizine Syrup",
+            "dosage": "2.5-5mg once daily",
+            "max_daily": "5mg",
+            "source": "Pediatric allergy relief",
+            "safety": "For children over 2 years"
+          }
+        ]
+      }
+    }
+  },
+  "home_remedies": {
+    "fever": [
+      "Drink plenty of water (8-10 glasses daily)",
+      "Take rest in a cool, comfortable room",
+      "Use damp cloth compress on forehead",
+      "Wear light, breathable clothing",
+      "Take lukewarm bath (not cold)"
+    ],
+    "headache": [
+      "Rest in a quiet, dark room for 20-30 minutes",
+      "Apply cold compress to forehead",
+      "Drink 2-3 glasses of water slowly",
+      "Practice deep breathing exercises",
+      "Gentle neck and shoulder stretches"
+    ],
+    "cough_dry": [
+      "Honey with warm water (1 tsp in warm water)",
+      "Use humidifier in room",
+      "Avoid cold air and dust",
+      "Steam inhalation (5-10 minutes)",
+      "Stay hydrated"
+    ],
+    "cough_wet": [
+      "Steam inhalation twice daily",
+      "Warm soups and fluids",
+      "Sleep with head elevated",
+      "Avoid cold drinks",
+      "Gargle with warm salt water"
+    ],
+    "sore_throat": [
+      "Gargle with warm salt water (3-4 times daily)",
+      "Drink warm liquids (tea, soup)",
+      "Avoid cold drinks and ice cream",
+      "Use humidifier",
+      "Rest your voice"
+    ],
+    "body_pain": [
+      "Rest and avoid strenuous activity",
+      "Apply warm compress to affected area",
+      "Gentle stretching exercises",
+      "Stay hydrated",
+      "Maintain good posture"
+    ],
+    "cold": [
+      "Rest and get adequate sleep (7-8 hours)",
+      "Drink warm fluids (tea, soup, warm water)",
+      "Use saline nasal drops for congestion",
+      "Steam inhalation twice daily",
+      "Vitamin C rich foods (citrus fruits)"
+    ],
+    "diarrhea": [
+      "Drink ORS frequently (small sips)",
+      "Eat bland foods (rice, banana, toast)",
+      "Avoid dairy products temporarily",
+      "Rest and avoid exertion",
+      "Maintain hand hygiene"
+    ],
+    "acidity": [
+      "Eat small, frequent meals (avoid large meals)",
+      "Avoid spicy, oily, and acidic foods",
+      "Don't lie down immediately after eating",
+      "Elevate head while sleeping",
+      "Drink cold milk for quick relief"
+    ],
+    "allergy": [
+      "Identify and avoid allergen triggers",
+      "Keep windows closed during high pollen days",
+      "Wash hands and face after outdoor exposure",
+      "Use air purifier indoors",
+      "Cold compress for itchy eyes"
+    ]
+  },
+  "avoid_list": {
+    "fever": [
+      "Cold drinks and ice",
+      "Heavy exercise or exertion",
+      "Alcohol consumption",
+      "Spicy or heavy foods",
+      "Dehydration"
+    ],
+    "headache": [
+      "Bright screens and lights",
+      "Loud noises",
+      "Caffeine (if sensitive)",
+      "Skipping meals",
+      "Stress and tension"
+    ],
+    "cough_dry": [
+      "Dust and smoke exposure",
+      "Cold air",
+      "Talking excessively",
+      "Dry environments",
+      "Irritants and allergens"
+    ],
+    "cough_wet": [
+      "Sugary foods and drinks",
+      "Dairy products (may increase mucus)",
+      "Cold beverages",
+      "Smoking",
+      "Lying flat (elevate head)"
+    ],
+    "sore_throat": [
+      "Cold drinks and ice cream",
+      "Spicy or acidic foods",
+      "Smoking",
+      "Shouting or straining voice",
+      "Dry air"
+    ],
+    "body_pain": [
+      "Overexertion",
+      "Poor posture",
+      "Prolonged sitting or standing",
+      "Heavy lifting",
+      "Stress"
+    ],
+    "cold": [
+      "Cold air exposure",
+      "Sharing utensils or towels",
+      "Touching face with unwashed hands",
+      "Crowded places",
+      "Lack of sleep"
+    ],
+    "diarrhea": [
+      "Spicy or oily foods",
+      "Dairy products (temporarily)",
+      "Raw or undercooked food",
+      "Caffeine and alcohol",
+      "High-fiber foods initially"
+    ],
+    "acidity": [
+      "Spicy, oily, and fried foods",
+      "Citrus fruits and tomatoes",
+      "Chocolate and caffeine",
+      "Alcohol and carbonated drinks",
+      "Late-night heavy meals"
+    ],
+    "allergy": [
+      "Known allergens (pollen, dust, pet dander)",
+      "Outdoor activities during high pollen count",
+      "Dusty environments",
+      "Strong perfumes or chemicals",
+      "Rubbing eyes or nose"
+    ]
+  },
+  "red_flags": {
+    "fever": [
+      "Fever above 103°F (39.4°C)",
+      "Fever lasting more than 3 days",
+      "Severe headache with stiff neck",
+      "Difficulty breathing",
+      "Persistent vomiting",
+      "Confusion or altered consciousness",
+      "Rash with fever"
+    ],
+    "headache": [
+      "Sudden, severe headache (worst ever)",
+      "Headache with fever and stiff neck",
+      "Vision changes or loss",
+      "Weakness or numbness",
+      "Difficulty speaking",
+      "Headache after head injury",
+      "Persistent vomiting"
+    ],
+    "cough": [
+      "Cough lasting more than 3 weeks",
+      "Blood in cough or phlegm",
+      "Difficulty breathing or wheezing",
+      "Chest pain",
+      "High fever with cough",
+      "Coughing up green/yellow phlegm",
+      "Weight loss with chronic cough"
+    ],
+    "sore_throat": [
+      "Difficulty swallowing or breathing",
+      "Severe pain lasting more than 5 days",
+      "High fever (above 101°F)",
+      "Swollen neck glands",
+      "White patches in throat",
+      "Drooling or unable to swallow saliva",
+      "Rash with sore throat"
+    ],
+    "body_pain": [
+      "Severe pain not relieved by rest",
+      "Pain with fever and rash",
+      "Joint swelling and redness",
+      "Pain lasting more than 2 weeks",
+      "Numbness or tingling",
+      "Difficulty moving affected area",
+      "Pain after injury or trauma"
+    ],
+    "cold": [
+      "Symptoms lasting more than 10 days",
+      "High fever (above 101°F)",
+      "Severe sinus pain or headache",
+      "Difficulty breathing or wheezing",
+      "Ear pain or discharge",
+      "Symptoms getting worse after 5 days"
+    ],
+    "diarrhea": [
+      "Diarrhea lasting more than 3 days",
+      "Blood or mucus in stool",
+      "Severe abdominal pain",
+      "Signs of dehydration (dry mouth, no urination)",
+      "High fever with diarrhea",
+      "Dizziness or weakness"
+    ],
+    "acidity": [
+      "Severe chest pain (rule out heart issues)",
+      "Difficulty swallowing",
+      "Persistent vomiting",
+      "Black or bloody stools",
+      "Unexplained weight loss",
+      "Symptoms not relieved by antacids"
+    ],
+    "allergy": [
+      "Difficulty breathing or wheezing",
+      "Swelling of face, lips, or tongue",
+      "Severe rash or hives",
+      "Dizziness or fainting",
+      "Rapid heartbeat",
+      "Symptoms not controlled by antihistamines"
+    ]
+  },
+  "safety_rules": {
+    "age_restrictions": {
+      "aspirin": {
+        "min_age": 16,
+        "reason": "Risk of Reye's syndrome in children"
+      },
+      "ibuprofen": {
+        "min_age": 6,
+        "reason": "Not recommended for young children"
+      },
+      "dextromethorphan": {
+        "min_age": 4,
+        "reason": "Safety not established in young children"
+      }
+    },
+    "condition_restrictions": {
+      "nsaids": ["stomach ulcers", "kidney disease", "heart disease", "bleeding disorders"],
+      "paracetamol": ["liver disease", "chronic alcohol use"],
+      "decongestants": ["high blood pressure", "heart disease", "glaucoma"]
+    },
+    "pregnancy_warnings": {
+      "avoid": ["ibuprofen (3rd trimester)", "aspirin", "codeine"],
+      "safe": ["paracetamol (as directed)"]
+    }
+  }
+}

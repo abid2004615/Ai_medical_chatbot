@@ -7,7 +7,7 @@ echo.
 REM Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python is not installed or not in PATH
+    echo [ERROR] Python is not installed
     echo Please install Python from https://www.python.org/downloads/
     pause
     exit /b 1
@@ -16,60 +16,41 @@ if errorlevel 1 (
 REM Check if Node.js is installed
 node --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Node.js is not installed or not in PATH
+    echo [ERROR] Node.js is not installed
     echo Please install Node.js from https://nodejs.org/
     pause
     exit /b 1
 )
 
-REM Check if pnpm is installed
-pnpm --version >nul 2>&1
-if errorlevel 1 (
-    echo [WARNING] pnpm is not installed
-    echo Installing pnpm globally...
-    npm install -g pnpm
-)
-
-echo [INFO] Checking port availability...
-
-REM Check if port 5000 is available
-netstat -ano | findstr :5000 >nul
-if not errorlevel 1 (
-    echo [WARNING] Port 5000 is already in use
-    echo Please stop the process using port 5000 or change the backend port
-    pause
-    exit /b 1
-)
-
-REM Check if port 3000 is available
-netstat -ano | findstr :3000 >nul
-if not errorlevel 1 (
-    echo [WARNING] Port 3000 is already in use
-    echo Please stop the process using port 3000 or change the frontend port
-    pause
-    exit /b 1
-)
-
+echo [INFO] Starting servers...
 echo.
-echo [1/4] Starting Backend Server...
-start "MediChat Backend" cmd /k "cd backend && python app.py"
-timeout /t 3 /nobreak >nul
 
-echo [2/4] Waiting for backend to initialize...
+REM Start Flask backend in a new window
+echo [1/3] Starting Flask Backend Server...
+start "MediChat Flask" cmd /k "cd backend && python app.py"
+
+REM Wait a bit for Flask to start
 timeout /t 2 /nobreak >nul
 
-echo [3/4] Starting Frontend Server...
-start "MediChat Frontend" cmd /k "cd frontend && pnpm dev"
+REM Start FastAPI streaming server in a new window
+echo [2/3] Starting Streaming Server...
+start "MediChat Streaming" cmd /k "cd backend && uvicorn streaming_chat:app --host 0.0.0.0 --port 8000 --reload"
 
-echo [4/4] Servers starting...
+REM Wait a bit for streaming server to start
+timeout /t 2 /nobreak >nul
+
+REM Start frontend in a new window
+echo [3/3] Starting Frontend Server...
+start "MediChat Frontend" cmd /k "cd frontend && npm run dev"
+
 echo.
 echo ========================================
-echo   Backend:  http://localhost:5000
-echo   Frontend: http://localhost:3000
+echo   Flask Backend:    http://localhost:5000
+echo   Streaming API:    http://localhost:8000
+echo   Frontend:         http://localhost:3000
 echo ========================================
 echo.
-echo Both servers are starting in separate windows.
-echo Close those windows or press Ctrl+C in them to stop the servers.
+echo Servers are starting in separate windows.
+echo Close those windows to stop the servers.
 echo.
-echo Press any key to exit this script...
-pause >nul
+pause

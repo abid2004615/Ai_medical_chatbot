@@ -42,25 +42,40 @@ if lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null 2>&1; then
     exit 1
 fi
 
+# Check if port 8000 is available
+if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "[WARNING] Port 8000 is already in use"
+    echo "Please stop the process using port 8000 or change the streaming port"
+    exit 1
+fi
+
 echo ""
-echo "[1/4] Starting Backend Server..."
+echo "[1/5] Starting Flask Backend Server..."
 cd backend && python3 app.py &
 BACKEND_PID=$!
 cd ..
 
-echo "[2/4] Waiting for backend to initialize..."
-sleep 3
+echo "[2/5] Waiting for Flask to initialize..."
+sleep 2
 
-echo "[3/4] Starting Frontend Server..."
+echo "[3/5] Starting Streaming Server..."
+cd backend && uvicorn streaming_chat:app --host 0.0.0.0 --port 8000 --reload &
+STREAMING_PID=$!
+cd ..
+
+echo "[4/5] Waiting for streaming server to initialize..."
+sleep 2
+
+echo "[5/5] Starting Frontend Server..."
 cd frontend && pnpm dev &
 FRONTEND_PID=$!
 cd ..
 
-echo "[4/4] Servers starting..."
 echo ""
 echo "========================================"
-echo "  Backend:  http://localhost:5000"
-echo "  Frontend: http://localhost:3000"
+echo "  Flask Backend:    http://localhost:5000"
+echo "  Streaming API:    http://localhost:8000"
+echo "  Frontend:         http://localhost:3000"
 echo "========================================"
 echo ""
 echo "Press Ctrl+C to stop all servers..."
@@ -70,6 +85,7 @@ cleanup() {
     echo ""
     echo "Stopping servers..."
     kill $BACKEND_PID 2>/dev/null
+    kill $STREAMING_PID 2>/dev/null
     kill $FRONTEND_PID 2>/dev/null
     echo "Servers stopped."
     exit 0
