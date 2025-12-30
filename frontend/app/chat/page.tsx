@@ -5,6 +5,7 @@ import { Send, Mic, MicOff, Volume2, VolumeX, Paperclip } from "lucide-react";
 import { EmergencyBanner } from "@/components/MedicalDisclaimer";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
+import { VoiceInputAnimation } from "@/components/VoiceInputAnimation";
 
 interface Message {
   id: string;
